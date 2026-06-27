@@ -223,34 +223,61 @@ with tab1:
     # Downsample every 3 readings for display (15-min)
     df_plot = df.iloc[::3].copy()
 
-    normal  = df_plot[df_plot["event"] == "✅ Normal"]
+    # Only flag readings where THIS SPECIFIC PARAMETER is outside its GMP limits
+    # — not other parameters' events projected onto this chart
+    param_breach_mask = (
+        (df_plot[param_choice] < s["LSL"]) |
+        (df_plot[param_choice] > s["USL"])
+    )
+    # Also flag UCL/LCL breaches (out of statistical control)
+    control_breach_mask = (
+        (df_plot[param_choice] < s["LCL"]) |
+        (df_plot[param_choice] > s["UCL"])
+    )
+
     washing_pts = df_plot[df_plot["event"] == "🧹 Room Washing / Cleaning"]
-    breach_pts  = df_plot[(df_plot["event"] != "✅ Normal") &
-                          (df_plot["event"] != "🧹 Room Washing / Cleaning")]
+    # GMP breach = outside spec limits for this parameter
+    gmp_breach_pts = df_plot[param_breach_mask & (df_plot["event"] != "🧹 Room Washing / Cleaning")]
+    # SPC breach = outside control limits but within spec (process instability)
+    spc_breach_pts = df_plot[
+        control_breach_mask & ~param_breach_mask &
+        (df_plot["event"] != "🧹 Room Washing / Cleaning")
+    ]
+    # Normal = within spec and within control limits
+    normal = df_plot[~param_breach_mask & ~control_breach_mask & (df_plot["event"] != "🧹 Room Washing / Cleaning")]
 
     fig = go.Figure()
 
-    # Normal readings
+    # Normal readings — continuous line
     fig.add_trace(go.Scatter(
-        x=normal["datetime"], y=normal[param_choice],
-        mode="lines", name="Normal",
+        x=df_plot["datetime"], y=df_plot[param_choice],
+        mode="lines", name="All Readings",
         line=dict(color="#60a5fa", width=1),
-        opacity=0.85
+        opacity=0.6
     ))
 
-    # Breach readings
-    fig.add_trace(go.Scatter(
-        x=breach_pts["datetime"], y=breach_pts[param_choice],
-        mode="markers", name="Anomaly",
-        marker=dict(color="#ff4d6d", size=5, symbol="circle"),
-    ))
+    # SPC control limit breaches (orange) — statistically unusual but within GMP spec
+    if len(spc_breach_pts):
+        fig.add_trace(go.Scatter(
+            x=spc_breach_pts["datetime"], y=spc_breach_pts[param_choice],
+            mode="markers", name="Out of Control (SPC)",
+            marker=dict(color="#f97316", size=5, symbol="circle"),
+        ))
+
+    # GMP spec breaches (red) — actual limit violation
+    if len(gmp_breach_pts):
+        fig.add_trace(go.Scatter(
+            x=gmp_breach_pts["datetime"], y=gmp_breach_pts[param_choice],
+            mode="markers", name="GMP Breach ⚠️",
+            marker=dict(color="#ff4d6d", size=7, symbol="x"),
+        ))
 
     # Room washing
     if show_washing and len(washing_pts):
         fig.add_trace(go.Scatter(
             x=washing_pts["datetime"], y=washing_pts[param_choice],
             mode="markers", name="Room Washing",
-            marker=dict(color="#ffb800", size=6, symbol="diamond"),
+            marker=dict(color="#ffb800", size=5, symbol="diamond"),
         ))
 
     # Mean line
